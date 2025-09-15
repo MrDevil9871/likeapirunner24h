@@ -1,5 +1,8 @@
 services:
   - type: worker
-    name: ff-like-bot
+    name: likeapirunner24h
     env: python
+    plan: free   # ya starter/paid jo plan use kar rahe ho
     startCommand: python main.py
+    buildCommand: pip install -r requirements.txt
+    runtime: python-3.10
