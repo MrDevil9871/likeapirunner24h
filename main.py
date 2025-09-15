@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 # 🔑 Env vars se secure values
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID", "5557283805"))  # default tumhara id
-API_URL = os.getenv("API_URL", "https://thuglikeapi.vercel.app/like")  # apni API URL
+API_URL = os.getenv("API_URL", "https://thuglikeapi-mw9h.vercel.app/like")  # apni API URL
 
 USAGE_FILE = "usage.json"
 VIP_FILE = "vip.json"
