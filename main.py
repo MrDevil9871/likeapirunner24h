@@ -2,7 +2,7 @@ import os
 import json
 import requests
 import datetime
-from telegram 
+from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 # 🔑 Env vars se secure values
