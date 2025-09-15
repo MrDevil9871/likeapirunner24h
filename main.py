@@ -1,126 +1,133 @@
 import os
 import json
-import random
-import asyncio
 import requests
-from fastapi import FastAPI, Request
-from telebot.async_telebot import AsyncTeleBot
+import datetime
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-# 🔒 ENV VARS (Render me set karo)
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
-OWNER_ID = int(os.getenv("OWNER_ID", "5557283805"))
+# 🔑 Env vars se secure values
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OWNER_ID = int(os.getenv("OWNER_ID", "5557283805"))  # default tumhara id
+API_URL = os.getenv("API_URL", "https://thuglikeapi.vercel.app/like")  # apni API URL
 
-# Token file (ind.json) auto-load
-TOKEN_FILE = "ind.json"
+USAGE_FILE = "usage.json"
+VIP_FILE = "vip.json"
+GROUPS_FILE = "groups.json"
 
-# ✅ FastAPI init
-app = FastAPI()
+# --- Utility: file handling ---
+def load_file(file, default):
+    if not os.path.exists(file):
+        with open(file, "w") as f:
+            json.dump(default, f)
+    with open(file, "r") as f:
+        return json.load(f)
 
-# ✅ Telegram bot init
-bot = AsyncTeleBot(BOT_TOKEN)
+def save_file(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=2)
 
-
-# -------------------------
-# Utility: Load valid tokens
-# -------------------------
-def load_tokens():
+# --- Core Like Sending ---
+def send_likes(uid: str, region: str):
     try:
-        with open(TOKEN_FILE, "r") as f:
-            tokens = json.load(f)
-        return [t["token"] for t in tokens if "token" in t]
-    except Exception:
-        return []
-
-
-# -------------------------
-# Core Like Sender Function
-# -------------------------
-async def send_likes(uid: str, region: str):
-    tokens = load_tokens()
-    if not tokens:
-        return "❌ No valid tokens available."
-
-    total_before = random.randint(100, 200)  # fake counter
-    sent_likes = 0
-
-    for t in tokens:
-        try:
-            # Example like request (change to real API call)
-            resp = requests.post(
-                "https://freefire-like-api.example.com/like",
-                headers={"Authorization": f"Bearer {t}"},
-                json={"uid": uid, "region": region},
-                timeout=10,
-            )
-            if resp.status_code == 200:
-                sent_likes += 1
-        except Exception:
-            continue
-
-    total_after = total_before + sent_likes
-    return (
-        f"✅ Likes sent successfully!\n\n"
-        f"🎯 UID: `{uid}`\n"
-        f"🌍 Region: `{region.upper()}`\n"
-        f"👍 Total Likes Before: {total_before}\n"
-        f"🚀 Sent: {sent_likes}\n"
-        f"📊 Total After: {total_after}"
-    )
-
-
-# -------------------------
-# Telegram Command: /like
-# -------------------------
-@bot.message_handler(commands=["like"])
-async def like_handler(message):
-    parts = message.text.strip().split()
-
-    # Format: /like ind UID
-    if len(parts) != 3:
-        await bot.reply_to(
-            message,
-            "❌ Wrong format!\n\nUse: `/like ind 123456789`",
-            parse_mode="Markdown",
+        resp = requests.get(
+            f"{API_URL}?uid={uid}&server={region.upper()}",
+            timeout=15
         )
+        return resp.json()
+    except Exception as e:
+        return {"status": 0, "error": str(e)}
+
+# --- Command: /like ind uid ---
+async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = str(update.effective_user.id)
+    chat_id = str(update.effective_chat.id)
+
+    # Owner bypass
+    if str(update.effective_user.id) != str(OWNER_ID):
+        groups = load_file(GROUPS_FILE, {})
+        if chat_id not in groups:
+            await update.message.reply_text("❌ This group is not allowed to use this bot.")
+            return
+
+    if len(context.args) != 2:
+        await update.message.reply_text("❌ Usage: /like <region> <uid>\nExample: /like ind 1234567890")
         return
 
-    _, region, uid = parts
+    region = context.args[0].lower()
+    uid = context.args[1]
 
-    status_msg = await bot.reply_to(message, "⏳ Processing your like request...")
-    result = await send_likes(uid, region)
+    # Load usage + VIP
+    usage = load_file(USAGE_FILE, {})
+    vip = load_file(VIP_FILE, {})
 
-    await bot.edit_message_text(
-        result,
-        chat_id=message.chat.id,
-        message_id=status_msg.message_id,
-        parse_mode="Markdown",
-    )
+    today = str(datetime.date.today())
+    if user_id not in usage:
+        usage[user_id] = {"date": today, "uids": []}
 
+    if usage[user_id]["date"] != today:
+        usage[user_id] = {"date": today, "uids": []}
 
-# -------------------------
-# Render Health Routes
-# -------------------------
-@app.get("/")
-async def root():
-    return {"status": "ok"}
+    # VIP bypass limit
+    if str(user_id) not in vip:
+        if uid in usage[user_id]["uids"]:
+            await update.message.reply_text("❌ You already used likes on this UID today.")
+            return
+        if len(usage[user_id]["uids"]) >= 3:
+            await update.message.reply_text("❌ Daily limit reached (3 UIDs). Contact @Mrdearuser for VIP.")
+            return
 
-@app.get("/favicon.ico")
-async def favicon():
-    return {}
+    # API call
+    result = send_likes(uid, region)
 
+    if result.get("status") == 1:
+        usage[user_id]["uids"].append(uid)
+        save_file(USAGE_FILE, usage)
+        msg = (
+            f"✅ Likes Sent!\n\n"
+            f"👤 Player: {result.get('player')}\n"
+            f"🆔 UID: {result.get('uid')}\n"
+            f"💙 Added: {result.get('likes_added')}\n"
+            f"📊 Before: {result.get('likes_before')}\n"
+            f"📈 After: {result.get('likes_after')}\n"
+            f"ℹ️ Remaining Today: {3 - len(usage[user_id]['uids'])}/3"
+        )
+    else:
+        msg = f"❌ Failed: {result}"
 
-# -------------------------
-# Startup: Run Bot
-# -------------------------
-@app.on_event("startup")
-async def on_startup():
-    print("🚀 Bot started successfully!")
-    asyncio.create_task(bot.polling(non_stop=True))
+    await update.message.reply_text(msg)
 
+# --- Owner commands ---
+async def allow_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != str(OWNER_ID):
+        return
+    if len(context.args) != 1:
+        await update.message.reply_text("Usage: /allowgroup <chat_id>")
+        return
+    groups = load_file(GROUPS_FILE, {})
+    groups[context.args[0]] = True
+    save_file(GROUPS_FILE, groups)
+    await update.message.reply_text(f"✅ Group {context.args[0]} allowed.")
 
-# -------------------------
-# Run (for local testing only)
-# -------------------------
+async def add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != str(OWNER_ID):
+        return
+    if len(context.args) != 1:
+        await update.message.reply_text("Usage: /vip <user_id>")
+        return
+    vip = load_file(VIP_FILE, {})
+    vip[context.args[0]] = True
+    save_file(VIP_FILE, vip)
+    await update.message.reply_text(f"✅ User {context.args[0]} promoted to VIP.")
+
+# --- Main ---
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("like", like_command))
+    app.add_handler(CommandHandler("allowgroup", allow_group))
+    app.add_handler(CommandHandler("vip", add_vip))
+
+    app.run_polling()
+
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+    main()
