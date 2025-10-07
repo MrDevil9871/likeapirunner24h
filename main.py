@@ -30,7 +30,7 @@ def save_file(file, data):
 def send_likes(uid: str, region: str):
     try:
         resp = requests.get(
-            f"{API_URL}?uid={uid}&server={region.upper()}",
+            f"{API_URL}?uid={uid}&region={region.upper()}",
             timeout=15
         )
         return resp.json()
