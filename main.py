@@ -77,23 +77,34 @@ async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     # API call
-    result = send_likes(uid, region)
+if result.get("status") == 1:
+    usage[user_id]["uids"].append(uid)
+    save_file(USAGE_FILE, usage)
 
-    if result.get("status") == 1:
-        usage[user_id]["uids"].append(uid)
-        save_file(USAGE_FILE, usage)
-        msg = (
-            f"✅ Likes Sent!\n\n"
-            f"👤 Player: {result.get('player')}\n"
-            f"🆔 UID: {result.get('uid')}\n"
-            f"💙 Added: {result.get('likes_added')}\n"
-            f"📊 Before: {result.get('likes_before')}\n"
-            f"📈 After: {result.get('likes_after')}\n"
-            f"ℹ️ Remaining Today: {3 - len(usage[user_id]['uids'])}/3"
-        )
-    else:
-        msg = f"❌ Failed: {result}"
+    player = result.get("player", {})
+    likes = result.get("likes", {})
 
+    nickname = player.get("nickname", "Unknown")
+    player_uid = player.get("uid", uid)
+    region = player.get("region", region.upper())
+
+    before = likes.get("before", 0)
+    after = likes.get("after", 0)
+    added = likes.get("added_by_api", 0)
+
+    msg = (
+        f"✅ Likes Sent Successfully!\n\n"
+        f"👤 Player: {nickname}\n"
+        f"🆔 UID: {player_uid}\n"
+        f"🌍 Region: {region}\n"
+        f"💙 Added: {added}\n"
+        f"📊 Before: {before}\n"
+        f"📈 After: {after}\n"
+        f"🔰 Credits: @MrDearUser\n"
+        f"ℹ️ Remaining Today: {3 - len(usage[user_id]['uids'])}/3"
+    )
+else:
+    msg = f"❌ Failed: {result}"
     await update.message.reply_text(msg)
 
 # --- Owner commands ---
