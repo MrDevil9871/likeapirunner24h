@@ -5,10 +5,12 @@ import datetime
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+import asyncio
+import threading
 
-# 🔑 Secure env vars
+# --- Config ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = int(os.getenv("OWNER_ID", "5557283805"))  # Default ID
+OWNER_ID = int(os.getenv("OWNER_ID", "5557283805"))
 API_URL = os.getenv("API_URL", "https://lordlike.onrender.com/like")
 
 USAGE_FILE = "usage.json"
@@ -16,7 +18,7 @@ VIP_FILE = "vip.json"
 GROUPS_FILE = "groups.json"
 
 
-# --- Utility: file handling ---
+# --- Utility ---
 def load_file(file, default):
     if not os.path.exists(file):
         with open(file, "w") as f:
@@ -24,13 +26,12 @@ def load_file(file, default):
     with open(file, "r") as f:
         return json.load(f)
 
-
 def save_file(file, data):
     with open(file, "w") as f:
         json.dump(data, f, indent=2)
 
 
-# --- Core Like Sending ---
+# --- Core ---
 def send_likes(uid: str, region: str):
     try:
         resp = requests.get(f"{API_URL}?uid={uid}&region={region.upper()}", timeout=15)
@@ -39,7 +40,7 @@ def send_likes(uid: str, region: str):
         return {"status": 0, "error": str(e)}
 
 
-# --- Command: /like ind uid ---
+# --- Telegram Commands ---
 async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     chat_id = str(update.effective_chat.id)
@@ -51,11 +52,10 @@ async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     if len(context.args) != 2:
-        await update.message.reply_text("❌ Usage: /like <region> <uid>\nExample: /like ind 1234567890")
+        await update.message.reply_text("❌ Usage: /like <region> <uid>")
         return
 
     region, uid = context.args[0].lower(), context.args[1]
-
     usage = load_file(USAGE_FILE, {})
     vip = load_file(VIP_FILE, {})
 
@@ -65,7 +65,7 @@ async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if str(user_id) not in vip:
         if uid in usage[user_id]["uids"]:
-            await update.message.reply_text("❌ You already used likes on this UID today.")
+            await update.message.reply_text("❌ Already used likes on this UID today.")
             return
         if len(usage[user_id]["uids"]) >= 3:
             await update.message.reply_text("❌ Daily limit reached (3 UIDs). Contact @MrDearUser for VIP.")
@@ -76,20 +76,18 @@ async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if result.get("status") == 1:
         usage[user_id]["uids"].append(uid)
         save_file(USAGE_FILE, usage)
-
         player = result.get("player", {})
         likes = result.get("likes", {})
 
         nickname = player.get("nickname", "Unknown")
         player_uid = player.get("uid", uid)
         region = player.get("region", region.upper())
-
         before = likes.get("before", 0)
         after = likes.get("after", 0)
         added = likes.get("added_by_api", 0)
 
         msg = (
-            f"✅ Likes Sent Successfully!\n\n"
+            f"✅ Likes Sent!\n\n"
             f"👤 Player: {nickname}\n"
             f"🆔 UID: {player_uid}\n"
             f"🌍 Region: {region}\n"
@@ -105,7 +103,6 @@ async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 
-# --- Owner commands ---
 async def allow_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(OWNER_ID):
         return
@@ -130,7 +127,7 @@ async def add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ User {context.args[0]} promoted to VIP.")
 
 
-# --- Flask server ---
+# --- Flask keep-alive ---
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
@@ -142,24 +139,18 @@ def favicon():
     return '', 204
 
 
-# --- Async main ---
-async def main():
-    # Start Telegram bot
+# --- Start bot in running loop ---
+def start_bot():
     bot_app = Application.builder().token(BOT_TOKEN).build()
     bot_app.add_handler(CommandHandler("like", like_command))
     bot_app.add_handler(CommandHandler("allowgroup", allow_group))
     bot_app.add_handler(CommandHandler("vip", add_vip))
-
-    import threading
-    import asyncio
-
-    # Start Flask in separate thread
-    threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))), daemon=True).start()
-
-    # Start bot polling
-    await bot_app.run_polling()
+    bot_app.run_polling()
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    # Run Flask in a thread
+    threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))), daemon=True).start()
+
+    # Run Telegram bot in main thread (async handled internally)
+    start_bot()
