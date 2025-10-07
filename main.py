@@ -8,7 +8,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 # 🔑 Secure env vars
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = int(os.getenv("OWNER_ID", "5557283805"))  # Default: tumhara ID
+OWNER_ID = int(os.getenv("OWNER_ID", "5557283805"))  # Default ID
 API_URL = os.getenv("API_URL", "https://lordlike.onrender.com/like")
 
 USAGE_FILE = "usage.json"
@@ -33,10 +33,7 @@ def save_file(file, data):
 # --- Core Like Sending ---
 def send_likes(uid: str, region: str):
     try:
-        resp = requests.get(
-            f"{API_URL}?uid={uid}&region={region.upper()}",
-            timeout=15
-        )
+        resp = requests.get(f"{API_URL}?uid={uid}&region={region.upper()}", timeout=15)
         return resp.json()
     except Exception as e:
         return {"status": 0, "error": str(e)}
@@ -47,7 +44,6 @@ async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     chat_id = str(update.effective_chat.id)
 
-    # Owner bypass
     if str(update.effective_user.id) != str(OWNER_ID):
         groups = load_file(GROUPS_FILE, {})
         if chat_id not in groups:
@@ -58,21 +54,15 @@ async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Usage: /like <region> <uid>\nExample: /like ind 1234567890")
         return
 
-    region = context.args[0].lower()
-    uid = context.args[1]
+    region, uid = context.args[0].lower(), context.args[1]
 
-    # Load usage + VIP
     usage = load_file(USAGE_FILE, {})
     vip = load_file(VIP_FILE, {})
 
     today = str(datetime.date.today())
-    if user_id not in usage:
+    if user_id not in usage or usage[user_id]["date"] != today:
         usage[user_id] = {"date": today, "uids": []}
 
-    if usage[user_id]["date"] != today:
-        usage[user_id] = {"date": today, "uids": []}
-
-    # VIP bypass limit
     if str(user_id) not in vip:
         if uid in usage[user_id]["uids"]:
             await update.message.reply_text("❌ You already used likes on this UID today.")
@@ -81,7 +71,6 @@ async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Daily limit reached (3 UIDs). Contact @MrDearUser for VIP.")
             return
 
-    # --- API call ---
     result = send_likes(uid, region)
 
     if result.get("status") == 1:
@@ -113,7 +102,6 @@ async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         msg = f"❌ Failed: {result}"
 
-    # ✅ Now inside function correctly
     await update.message.reply_text(msg)
 
 
@@ -142,32 +130,36 @@ async def add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ User {context.args[0]} promoted to VIP.")
 
 
-# --- Telegram bot runner ---
-def run_bot():
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("like", like_command))
-    app.add_handler(CommandHandler("allowgroup", allow_group))
-    app.add_handler(CommandHandler("vip", add_vip))
-    app.run_polling()
-
-
-# --- Flask keep-alive server for Render ---
+# --- Flask server ---
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
-    return "✅ Free Fire Like Bot is running fine on Render!"
+    return "✅ Free Fire Like Bot is running on Render!"
 
 @flask_app.route('/favicon.ico')
 def favicon():
     return '', 204
 
 
-if __name__ == "__main__":
-    # Run both bot and web server
+# --- Async main ---
+async def main():
+    # Start Telegram bot
+    bot_app = Application.builder().token(BOT_TOKEN).build()
+    bot_app.add_handler(CommandHandler("like", like_command))
+    bot_app.add_handler(CommandHandler("allowgroup", allow_group))
+    bot_app.add_handler(CommandHandler("vip", add_vip))
+
     import threading
+    import asyncio
 
-    threading.Thread(target=run_bot, daemon=True).start()
+    # Start Flask in separate thread
+    threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080))), daemon=True).start()
 
-    port = int(os.environ.get("PORT", 8080))
-    flask_app.run(host="0.0.0.0", port=port)
+    # Start bot polling
+    await bot_app.run_polling()
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(main())
