@@ -2,17 +2,19 @@ import os
 import json
 import requests
 import datetime
+from flask import Flask
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# 🔑 Env vars se secure values
+# 🔑 Secure env vars
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = int(os.getenv("OWNER_ID", "5557283805"))  # default tumhara id
-API_URL = os.getenv("API_URL", "https://lordlike.onrender.com/like")  # apni API URL
+OWNER_ID = int(os.getenv("OWNER_ID", "5557283805"))  # Default: tumhara ID
+API_URL = os.getenv("API_URL", "https://lordlike.onrender.com/like")
 
 USAGE_FILE = "usage.json"
 VIP_FILE = "vip.json"
 GROUPS_FILE = "groups.json"
+
 
 # --- Utility: file handling ---
 def load_file(file, default):
@@ -22,9 +24,11 @@ def load_file(file, default):
     with open(file, "r") as f:
         return json.load(f)
 
+
 def save_file(file, data):
     with open(file, "w") as f:
         json.dump(data, f, indent=2)
+
 
 # --- Core Like Sending ---
 def send_likes(uid: str, region: str):
@@ -36,6 +40,7 @@ def send_likes(uid: str, region: str):
         return resp.json()
     except Exception as e:
         return {"status": 0, "error": str(e)}
+
 
 # --- Command: /like ind uid ---
 async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73,39 +78,44 @@ async def like_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ You already used likes on this UID today.")
             return
         if len(usage[user_id]["uids"]) >= 3:
-            await update.message.reply_text("❌ Daily limit reached (3 UIDs). Contact @Mrdearuser for VIP.")
+            await update.message.reply_text("❌ Daily limit reached (3 UIDs). Contact @MrDearUser for VIP.")
             return
 
-    # API call
-if result.get("status") == 1:
-    usage[user_id]["uids"].append(uid)
-    save_file(USAGE_FILE, usage)
+    # --- API call ---
+    result = send_likes(uid, region)
 
-    player = result.get("player", {})
-    likes = result.get("likes", {})
+    if result.get("status") == 1:
+        usage[user_id]["uids"].append(uid)
+        save_file(USAGE_FILE, usage)
 
-    nickname = player.get("nickname", "Unknown")
-    player_uid = player.get("uid", uid)
-    region = player.get("region", region.upper())
+        player = result.get("player", {})
+        likes = result.get("likes", {})
 
-    before = likes.get("before", 0)
-    after = likes.get("after", 0)
-    added = likes.get("added_by_api", 0)
+        nickname = player.get("nickname", "Unknown")
+        player_uid = player.get("uid", uid)
+        region = player.get("region", region.upper())
 
-    msg = (
-        f"✅ Likes Sent Successfully!\n\n"
-        f"👤 Player: {nickname}\n"
-        f"🆔 UID: {player_uid}\n"
-        f"🌍 Region: {region}\n"
-        f"💙 Added: {added}\n"
-        f"📊 Before: {before}\n"
-        f"📈 After: {after}\n"
-        f"🔰 Credits: @MrDearUser\n"
-        f"ℹ️ Remaining Today: {3 - len(usage[user_id]['uids'])}/3"
-    )
-else:
-    msg = f"❌ Failed: {result}"
+        before = likes.get("before", 0)
+        after = likes.get("after", 0)
+        added = likes.get("added_by_api", 0)
+
+        msg = (
+            f"✅ Likes Sent Successfully!\n\n"
+            f"👤 Player: {nickname}\n"
+            f"🆔 UID: {player_uid}\n"
+            f"🌍 Region: {region}\n"
+            f"💙 Added: {added}\n"
+            f"📊 Before: {before}\n"
+            f"📈 After: {after}\n"
+            f"🔰 Credits: @MrDearUser\n"
+            f"ℹ️ Remaining Today: {3 - len(usage[user_id]['uids'])}/3"
+        )
+    else:
+        msg = f"❌ Failed: {result}"
+
+    # ✅ Now inside function correctly
     await update.message.reply_text(msg)
+
 
 # --- Owner commands ---
 async def allow_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -119,6 +129,7 @@ async def allow_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_file(GROUPS_FILE, groups)
     await update.message.reply_text(f"✅ Group {context.args[0]} allowed.")
 
+
 async def add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if str(update.effective_user.id) != str(OWNER_ID):
         return
@@ -130,15 +141,27 @@ async def add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_file(VIP_FILE, vip)
     await update.message.reply_text(f"✅ User {context.args[0]} promoted to VIP.")
 
-# --- Main ---
-def main():
-    app = Application.builder().token(BOT_TOKEN).build()
 
+# --- Telegram bot runner ---
+def run_bot():
+    app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("like", like_command))
     app.add_handler(CommandHandler("allowgroup", allow_group))
     app.add_handler(CommandHandler("vip", add_vip))
-
     app.run_polling()
+
+
+# --- Flask keep-alive server for Render ---
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def home():
+    return "✅ Free Fire Like Bot is running fine on Render!"
+
+@flask_app.route('/favicon.ico')
+def favicon():
+    return '', 204
+
 
 if __name__ == "__main__":
     # Run both bot and web server
