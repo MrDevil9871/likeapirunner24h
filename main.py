@@ -33,7 +33,7 @@ def save_file(file, data):
 def send_likes(uid: str, region: str, retries=1):
     """Send likes using API. Retries once if network error."""
     try:
-        resp = requests.get(f"{API_URL}?uid={uid}&region={region.upper()}", timeout=30)
+        resp = requests.get(f"{API_URL}?uid={uid}&region={region.upper()}", timeout=10)
         return resp.json()
     except Exception as e:
         if retries > 0:
